@@ -4,7 +4,9 @@ using System.Text.Json;
 using BTD_Mod_Helper;
 using BTD_Mod_Helper.Api.Helpers;
 using BTD_Mod_Helper.Extensions;
+using Il2CppAssets.Scripts.Models;
 using Il2CppAssets.Scripts.Models.Bloons;
+using Il2CppAssets.Scripts.Models.Towers;
 using Il2CppAssets.Scripts.Unity;
 using Il2CppAssets.Scripts.Unity.UI_New.Knowledge;
 using MelonLoader;
@@ -35,7 +37,8 @@ public class Mod : BloonsTD6Mod
         return new[] { c.x, c.y, corners[2].x - corners[0].x, corners[2].y - corners[0].y };
     }
 
-    // Facts the Mod Helper export lacks: game version, shop order of towers, bloon property bits.
+    // Facts the Mod Helper export lacks: game version, shop order of towers, bloon property bits, tower set bits,
+    // hero XP per round, map difficulty reward scale, starting cash.
     static void DumpGame(string dir)
     {
         var towers = new List<object>();
@@ -60,8 +63,23 @@ public class Mod : BloonsTD6Mod
         var propType = typeof(BloonModel).GetProperty("bloonProperties").PropertyType;
         foreach (var v in System.Enum.GetValues(propType))
             props[v.ToString()] = System.Convert.ToInt32(v);
+        var sets = new Dictionary<string, int>();
+        var setType = typeof(TowerModel).GetProperty("towerSet").PropertyType;
+        foreach (var v in System.Enum.GetValues(setType))
+            sets[v.ToString()] = System.Convert.ToInt32(v);
+        // hero XP per round from the game's own function, index = round number (0 included to see the base)
+        var heroXp = new List<float>();
+        for (var r = 0; r <= 140; r++)
+            heroXp.Add(Il2CppAssets.Scripts.Simulation.Simulation.GetXpForRound(r, Game.instance.model));
+        var trackReward = new Dictionary<string, float>();
+        foreach (var d in new[] { "Beginner", "Intermediate", "Advanced", "Expert" })
+            trackReward[d] = GameModel.ScaleRewardForTrackDifficulty(1f, d);
         File.WriteAllText(Path.Combine(dir, "game.json"), JsonSerializer.Serialize(
-            new { version = Application.version, towerSet = towers, heroSet = heroes, heroScreen = screen, bloonProperties = props },
+            new
+            {
+                version = Application.version, towerSet = towers, heroSet = heroes, heroScreen = screen, bloonProperties = props,
+                towerSets = sets, heroXpPerRound = heroXp, trackDifficultyReward = trackReward, startCash = Game.instance.model.cash
+            },
             new JsonSerializerOptions { WriteIndented = true }));
         ModHelper.Msg<Mod>($"Dumped {towers.Count} towers, version {Application.version}");
     }
