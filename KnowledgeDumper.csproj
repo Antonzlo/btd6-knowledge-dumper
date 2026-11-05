@@ -23,4 +23,8 @@
     <Reference Include="Il2CppNinjaKiwi.Common"><HintPath>$(Il2CppAssemblies)/Il2CppNinjaKiwi.Common.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Btd6ModHelper"><HintPath>$(BloonsTD6)/Mods/Btd6ModHelper.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
+  <ItemGroup>
+    <!-- drop a square Icon.png next to the project: Mod Helper shows it on the Mods screen -->
+    <EmbeddedResource Include="Icon.png" Condition="Exists('Icon.png')" />
+  </ItemGroup>
 </Project>

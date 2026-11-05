@@ -16,7 +16,7 @@ using MelonLoader;
 using MelonLoader.Utils;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(KnowledgeDumper.Mod), "Knowledge Dumper", "0.1.0", "antonzlo")]
+[assembly: MelonInfo(typeof(KnowledgeDumper.Mod), KnowledgeDumper.ModHelperData.Name, KnowledgeDumper.ModHelperData.Version, KnowledgeDumper.ModHelperData.Author)]
 [assembly: MelonGame("Ninja Kiwi", "BloonsTD6")]
 
 namespace KnowledgeDumper;
