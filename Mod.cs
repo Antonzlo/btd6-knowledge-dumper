@@ -6,7 +6,10 @@ using BTD_Mod_Helper.Api.Helpers;
 using BTD_Mod_Helper.Extensions;
 using Il2CppAssets.Scripts.Models;
 using Il2CppAssets.Scripts.Models.Bloons;
+using Il2CppAssets.Scripts.Models.Map;
 using Il2CppAssets.Scripts.Models.Towers;
+using Il2CppAssets.Scripts.Simulation;
+using Il2CppAssets.Scripts.Unity.UI_New.InGame;
 using Il2CppAssets.Scripts.Unity;
 using Il2CppAssets.Scripts.Unity.UI_New.Knowledge;
 using MelonLoader;
@@ -38,7 +41,7 @@ public class Mod : BloonsTD6Mod
     }
 
     // Facts the Mod Helper export lacks: game version, shop order of towers, bloon property bits, tower set bits,
-    // hero XP per round, map difficulty reward scale, starting cash.
+    // starting cash.
     static void DumpGame(string dir)
     {
         var towers = new List<object>();
@@ -67,21 +70,36 @@ public class Mod : BloonsTD6Mod
         var setType = typeof(TowerModel).GetProperty("towerSet").PropertyType;
         foreach (var v in System.Enum.GetValues(setType))
             sets[v.ToString()] = System.Convert.ToInt32(v);
-        // hero XP per round from the game's own function, index = round number (0 included to see the base)
-        var heroXp = new List<float>();
-        for (var r = 0; r <= 140; r++)
-            heroXp.Add(Il2CppAssets.Scripts.Simulation.Simulation.GetXpForRound(r, Game.instance.model));
-        var trackReward = new Dictionary<string, float>();
-        foreach (var d in new[] { "Beginner", "Intermediate", "Advanced", "Expert" })
-            trackReward[d] = GameModel.ScaleRewardForTrackDifficulty(1f, d);
         File.WriteAllText(Path.Combine(dir, "game.json"), JsonSerializer.Serialize(
             new
             {
                 version = Application.version, towerSet = towers, heroSet = heroes, heroScreen = screen, bloonProperties = props,
-                towerSets = sets, heroXpPerRound = heroXp, trackDifficultyReward = trackReward, startCash = Game.instance.model.cash
+                towerSets = sets, startCash = Game.instance.model.cash
             },
             new JsonSerializerOptions { WriteIndented = true }));
         ModHelper.Msg<Mod>($"Dumped {towers.Count} towers, version {Application.version}");
+    }
+
+    // Only inside a match (GetXpForRound fails in the menu): hero XP per round and the XP scale of each map difficulty.
+    static void DumpInGame(string dir)
+    {
+        var sim = InGame.instance != null && InGame.instance.bridge != null ? InGame.instance.bridge.simulation : null;
+        if (sim == null) return;
+        var heroXp = new List<float>();
+        for (var r = 0; r <= 140; r++)  // index = round number, 0 included to see the base
+            heroXp.Add(Simulation.GetXpForRound(r, sim.model));
+        // the static array is indexed by the MapDifficulty enum
+        var scales = new Dictionary<string, float>();
+        var table = Simulation.trackDifficultyXpScale;
+        foreach (var v in System.Enum.GetValues(typeof(MapModel).GetProperty("mapDifficulty").PropertyType))
+        {
+            var i = System.Convert.ToInt32(v);
+            if (table != null && i >= 0 && i < table.Length) scales[v.ToString()] = table[i];
+        }
+        File.WriteAllText(Path.Combine(dir, "xp.json"), JsonSerializer.Serialize(
+            new { heroXpPerRound = heroXp, trackDifficultyXpScale = scales },
+            new JsonSerializerOptions { WriteIndented = true }));
+        ModHelper.Msg<Mod>($"Dumped hero XP for 140 rounds and {scales.Count} map XP scales");
     }
 
     static void Dump()
@@ -89,6 +107,7 @@ public class Mod : BloonsTD6Mod
         var dir = Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout");
         Directory.CreateDirectory(Path.Combine(dir, "icons"));
         DumpGame(dir);
+        DumpInGame(dir);
 
         var buttons = new List<KnowledgeSkillBtn>();
         foreach (var b in UnityEngine.Resources.FindObjectsOfTypeAll<KnowledgeSkillBtn>())
