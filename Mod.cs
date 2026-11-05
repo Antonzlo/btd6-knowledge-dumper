@@ -140,7 +140,7 @@ public class Mod : BloonsTD6Mod
         }
         Step(5, "dumping hero XP, back to the main menu");
         DumpInGame(Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout"));
-        Menus.GoToMainMenu();
+        InGame.instance.QuitToMainMenu();  // what the pause screen home button does
         for (var end = Time.realtimeSinceStartup + 60; Time.realtimeSinceStartup < end && InMatch();) yield return null;
         yield return Finish("Knowledge Dumper: done, files in <game>/KnowledgeLayout");
     }
