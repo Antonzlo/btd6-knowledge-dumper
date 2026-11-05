@@ -8,6 +8,7 @@ using BTD_Mod_Helper.Extensions;
 using Il2CppAssets.Scripts.Data;
 using Il2CppAssets.Scripts.Models;
 using Il2CppAssets.Scripts.Models.Bloons;
+using Il2CppAssets.Scripts.Models.Map;
 using Il2CppAssets.Scripts.Models.Towers;
 using Il2CppAssets.Scripts.Simulation;
 using Il2CppAssets.Scripts.Unity.UI_New.InGame;
@@ -59,6 +60,11 @@ public class Mod : BloonsTD6Mod
         var combo = Input.GetKey(KeyCode.LeftControl) && Input.GetKey(KeyCode.LeftShift);
         if (Input.GetKeyDown(KeyCode.F6)) { if (combo) MelonCoroutines.Start(Auto()); else Dump(); }
         if (Input.GetKeyDown(KeyCode.F7)) { if (combo) WhereAmI(); else MelonCoroutines.Start(Icons.Dump()); }
+        if (combo && Input.GetKeyDown(KeyCode.F9))
+        {
+            if (mapsRunning) mapsStop = true;
+            else MelonCoroutines.Start(AutoMaps());
+        }
     }
 
     static bool KnowledgeOpen()
@@ -144,6 +150,77 @@ public class Mod : BloonsTD6Mod
         InGame.instance.QuitToMainMenu();  // what the pause screen home button does
         for (var end = Time.realtimeSinceStartup + 60; Time.realtimeSinceStartup < end && InMatch();) yield return null;
         yield return Finish("Knowledge Dumper: done, files in <game>/KnowledgeLayout");
+    }
+
+    static bool mapsRunning, mapsStop;
+
+    // Ctrl+Shift+F9 from the main menu: loads every map in a sandbox match and writes a summary of its MapModel
+    // (paths, removable obstacles, line of sight blockers, map behaviours) to maps.json. The MapModel only exists while
+    // its map is loaded, so there is no way around loading each one. Maps already in the file are skipped, so a run
+    // that stopped continues where it left off; pressing the keys again stops after the current map.
+    static IEnumerator AutoMaps()
+    {
+        mapsRunning = true;
+        mapsStop = false;
+        var path = Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout", "maps.json");
+        var done = new Dictionary<string, JsonElement>();
+        if (File.Exists(path))
+            foreach (var p in JsonDocument.Parse(File.ReadAllText(path)).RootElement.EnumerateObject()) done[p.Name] = p.Value.Clone();
+        var ids = new List<string>();
+        foreach (var m in GameData.Instance.mapSet.Maps.items)
+            if (!m.isDebug && !done.ContainsKey(m.id)) ids.Add(m.id);
+        for (var i = 0; i < ids.Count && !mapsStop; i++)
+        {
+            status = $"Knowledge Dumper maps {i + 1}/{ids.Count}: {ids[i]} (Ctrl+Shift+F9 stops)";
+            Log(status);
+            var data = InGameData.Editable;
+            data.selectedMode = "Sandbox";
+            data.selectedMap = ids[i];
+            data.selectedDifficulty = "Easy";
+            Il2CppAssets.Scripts.Unity.UI_New.UI.instance.LoadGame(null, null, null, false, false);
+            for (var end = Time.realtimeSinceStartup + 60; Time.realtimeSinceStartup < end && !InMatch();) yield return null;
+            yield return new WaitForSecondsRealtime(1);
+            if (InMatch())
+            {
+                done[ids[i]] = JsonSerializer.SerializeToElement(MapSummary(InGame.instance.bridge.simulation.model.map));
+                File.WriteAllText(path, JsonSerializer.Serialize(done, new JsonSerializerOptions { WriteIndented = true }));
+                InGame.instance.QuitToMainMenu();
+            }
+            else Log($"{ids[i]} did not load, skipped");
+            for (var end = Time.realtimeSinceStartup + 60;
+                 Time.realtimeSinceStartup < end && (InMatch() || Menus.IsTransitioning || Menus.GetCurrentMenuName() != "MainMenuUi");)
+                yield return null;
+            yield return new WaitForSecondsRealtime(1);
+        }
+        mapsRunning = false;
+        yield return Finish($"Knowledge Dumper: {done.Count} maps in maps.json" + (mapsStop ? " (stopped)" : ""));
+    }
+
+    static object MapSummary(MapModel map)
+    {
+        var paths = new List<float>();
+        foreach (var p in map.paths)
+        {
+            if (p == null || !p.isActive || p.isHidden || p.points == null || p.points.Length == 0) continue;
+            paths.Add(p.points[p.points.Length - 1].distance);  // distance runs along the path, the last point holds its length
+        }
+        var removables = new List<object>();
+        if (map.removeables != null)
+            foreach (var r in map.removeables)
+                if (r != null) removables.Add(new { name = r.menuName, text = r.textKey, cost = r.removealCost });
+        var behaviours = new List<string>();
+        if (map.mapBehaviours != null)
+            foreach (var b in map.mapBehaviours)
+                if (b != null) behaviours.Add(b.GetIl2CppType().Name);
+        if (map.simBehaviors != null)
+            foreach (var b in map.simBehaviors)
+                if (b != null) behaviours.Add(b.GetIl2CppType().Name);
+        return new
+        {
+            paths, removables, blockers = map.blockers?.Length ?? 0, speed = map.mapWideBloonSpeed,
+            peninsula = map.isPeninsula, regenRemovables = map.regenRemovables,
+            behaviours,
+        };
     }
 
     static IEnumerator ToMainMenu()
