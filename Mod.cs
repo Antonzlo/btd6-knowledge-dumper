@@ -90,11 +90,15 @@ public class Mod : BloonsTD6Mod
         Log(KnowledgeOpen() ? "knowledge tree open" : "knowledge tree did not open");
         yield return new WaitForSecondsRealtime(1);  // let the tree lay itself out before reading positions
         Dump();
-        // a match must start from the main menu: loading it over the knowledge tree leaves an empty blurred screen
-        Menus.CloseAllMenus();
-        for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && Menus.IsTransitioning;) yield return null;
+        // hero select screen: game.json then gets the order of its hero buttons
+        yield return ToMainMenu();
+        Menus.OpenMenu("HeroDetailsUI", null, false);
+        for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && HeroScreen().Count == 0;) yield return null;
         yield return new WaitForSecondsRealtime(1);
-        Log("closed menus");
+        Log($"hero screen: {HeroScreen().Count} heroes");
+        DumpGame(Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout"));
+        // a match must start from the main menu: loading it over another menu leaves an empty blurred screen
+        yield return ToMainMenu();
         // sandbox: a new standard game here could replace a saved game on this map
         var data = InGameData.Editable;
         data.selectedMode = "Sandbox";
@@ -109,26 +113,17 @@ public class Mod : BloonsTD6Mod
         else ModHelper.Msg<Mod>("Match did not start in 60 s, press F6 inside a match for the XP data.");
     }
 
-    static float[] Rect(RectTransform rt)
+    static IEnumerator ToMainMenu()
     {
-        // world-space centre and size; the wiki normalises per knowledge set
-        var corners = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3>(4);
-        rt.GetWorldCorners(corners);
-        var c = (corners[0] + corners[2]) / 2;
-        return new[] { c.x, c.y, corners[2].x - corners[0].x, corners[2].y - corners[0].y };
+        Menus.CloseAllMenus();
+        for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && Menus.IsTransitioning;) yield return null;
+        yield return new WaitForSecondsRealtime(1);
+        Log("closed menus");
     }
 
-    // Facts the Mod Helper export lacks: game version, shop order of towers, bloon property bits, tower set bits,
-    // starting cash.
-    static void DumpGame(string dir)
+    // order of the buttons on the hero select screen (empty unless that screen is open), left to right, top to bottom
+    static List<string> HeroScreen()
     {
-        var towers = new List<object>();
-        foreach (var t in Game.instance.model.towerSet)
-            towers.Add(new { id = t.towerId, index = t.towerIndex });
-        var heroes = new List<object>();
-        foreach (var h in Game.instance.model.heroSet)
-            heroes.Add(new { id = h.towerId, index = h.towerIndex });
-        // order of the buttons on the hero select screen (only when that screen is open), as shown left to right, top to bottom
         var screen = new List<string>();
         foreach (var s in UnityEngine.Resources.FindObjectsOfTypeAll<Il2CppAssets.Scripts.Unity.UI_New.Main.HeroSelect.HeroUpgradeDetails>())
             if (s.gameObject.scene.IsValid() && s.heroButtons != null && s.heroButtons.Count > 0)
@@ -139,6 +134,35 @@ public class Mod : BloonsTD6Mod
                 foreach (var b in buttons) screen.Add(b.heroModel.towerId);
                 break;
             }
+        return screen;
+    }
+
+    static float[] Rect(RectTransform rt)
+    {
+        // world-space centre and size; the wiki normalises per knowledge set
+        var corners = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3>(4);
+        rt.GetWorldCorners(corners);
+        var c = (corners[0] + corners[2]) / 2;
+        return new[] { c.x, c.y, corners[2].x - corners[0].x, corners[2].y - corners[0].y };
+    }
+
+    // Facts the Mod Helper export lacks: game version, shop order of towers and heroes, bloon property bits, tower set bits.
+    static void DumpGame(string dir)
+    {
+        var towers = new List<object>();
+        foreach (var t in Game.instance.model.towerSet)
+            towers.Add(new { id = t.towerId, index = t.towerIndex });
+        var heroes = new List<object>();
+        foreach (var h in Game.instance.model.heroSet)
+            heroes.Add(new { id = h.towerId, index = h.towerIndex });
+        var screen = HeroScreen();
+        var path = Path.Combine(dir, "game.json");
+        if (screen.Count == 0 && File.Exists(path))  // hero screen not open: keep the order from the last dump
+        {
+            var old = JsonDocument.Parse(File.ReadAllText(path)).RootElement;
+            if (old.TryGetProperty("heroScreen", out var hs))
+                foreach (var h in hs.EnumerateArray()) screen.Add(h.GetString());
+        }
         var props = new Dictionary<string, int>();
         // the enum's namespace differs between game versions; take its type from the model field
         var propType = typeof(BloonModel).GetProperty("bloonProperties").PropertyType;
@@ -148,11 +172,11 @@ public class Mod : BloonsTD6Mod
         var setType = typeof(TowerModel).GetProperty("towerSet").PropertyType;
         foreach (var v in System.Enum.GetValues(setType))
             sets[v.ToString()] = System.Convert.ToInt32(v);
-        File.WriteAllText(Path.Combine(dir, "game.json"), JsonSerializer.Serialize(
+        File.WriteAllText(path, JsonSerializer.Serialize(
             new
             {
                 version = Application.version, towerSet = towers, heroSet = heroes, heroScreen = screen, bloonProperties = props,
-                towerSets = sets, startCash = Game.instance.model.cash
+                towerSets = sets
             },
             new JsonSerializerOptions { WriteIndented = true }));
         ModHelper.Msg<Mod>($"Dumped {towers.Count} towers, version {Application.version}");
@@ -164,7 +188,7 @@ public class Mod : BloonsTD6Mod
         var sim = InGame.instance != null && InGame.instance.bridge != null ? InGame.instance.bridge.simulation : null;
         if (sim == null) return;
         var heroXp = new List<float>();
-        for (var r = 0; r <= 140; r++)  // index = round number, 0 included to see the base
+        for (var r = 0; r < 500; r++)  // index = rounds completed, so [0] is the XP for finishing round 1
             heroXp.Add(Simulation.GetXpForRound(r, sim.model));
         // the static array is indexed by the MapDifficulty enum
         var scales = new Dictionary<string, float>();
