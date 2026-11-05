@@ -70,7 +70,7 @@ public class Mod : BloonsTD6Mod
     static IEnumerator Auto()
     {
         Log("auto dump start");
-        Menus.OpenMenu("KnowledgeMain", null, false);
+        Menus.OpenMenu("KnowledgeMainUI", null, false);
         // KnowledgeMain is the category picker; OpenPage is what a category button calls to show the tree
         KnowledgeMain main = null;
         for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && main == null;)
