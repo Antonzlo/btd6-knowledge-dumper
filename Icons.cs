@@ -51,7 +51,7 @@ public static class Icons
         foreach (var p in model.powers) refs.Add(("powers", p.name, p.icon));
         // Geraldo shop items by item name, map previews by map id (both match the Mod Helper export file names)
         foreach (var g in model.geraldoItemModels) refs.Add(("geraldo", g.name, g.defaultIcon));
-        foreach (var m in Il2CppAssets.Scripts.Data.GameData.Instance.mapSet.Maps) refs.Add(("maps", m.id, m.mapSprite));
+        foreach (var m in Il2CppAssets.Scripts.Data.GameData.Instance.mapSet.Maps.items) refs.Add(("maps", m.id, m.mapSprite));
         // achievement icons by achievement id (achievements.json has the same ids)
         foreach (var a in Il2CppAssets.Scripts.Data.GameData.Instance.achievements.achievements)
             refs.Add(("achievements", a.achievementId.ToString(), a.achievementIcon));
