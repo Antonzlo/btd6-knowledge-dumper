@@ -45,6 +45,20 @@ public class Mod : BloonsTD6Mod
     static IEnumerator Auto()
     {
         Il2CppAssets.Scripts.Unity.Menu.MenuManager.instance.OpenMenu("KnowledgeMain", null, false);
+        // KnowledgeMain is the category picker; OpenPage is what a category button calls to show the tree
+        KnowledgeMain main = null;
+        for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && main == null;)
+        {
+            foreach (var m in UnityEngine.Resources.FindObjectsOfTypeAll<KnowledgeMain>())
+                if (m.gameObject.scene.IsValid() && m.gameObject.activeInHierarchy) main = m;
+            if (main == null) yield return null;
+        }
+        if (main == null)
+        {
+            ModHelper.Msg<Mod>("Monkey Knowledge menu did not open.");
+            yield break;
+        }
+        main.OpenPage(0);
         for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && !KnowledgeOpen();) yield return null;
         yield return new WaitForSecondsRealtime(1);  // let the tree lay itself out before reading positions
         Dump();
