@@ -168,7 +168,7 @@ public class Mod : BloonsTD6Mod
             foreach (var p in JsonDocument.Parse(File.ReadAllText(path)).RootElement.EnumerateObject()) done[p.Name] = p.Value.Clone();
         var ids = new List<string>();
         foreach (var m in GameData.Instance.mapSet.Maps.items)
-            if (!m.isDebug && !done.ContainsKey(m.id)) ids.Add(m.id);
+            if (!m.isDebug && !m.isBrowserOnly && !done.ContainsKey(m.id)) ids.Add(m.id);  // browser-only: editor stub and web maps
         for (var i = 0; i < ids.Count && !mapsStop; i++)
         {
             status = $"Knowledge Dumper maps {i + 1}/{ids.Count}: {ids[i]} (Ctrl+Shift+F9 stops)";
@@ -182,8 +182,15 @@ public class Mod : BloonsTD6Mod
             yield return new WaitForSecondsRealtime(1);
             if (InMatch())
             {
-                done[ids[i]] = JsonSerializer.SerializeToElement(MapSummary(InGame.instance.bridge.simulation.model.map));
-                File.WriteAllText(path, JsonSerializer.Serialize(done, new JsonSerializerOptions { WriteIndented = true }));
+                try
+                {
+                    done[ids[i]] = JsonSerializer.SerializeToElement(MapSummary(InGame.instance.bridge.simulation.model.map));
+                    File.WriteAllText(path, JsonSerializer.Serialize(done, new JsonSerializerOptions { WriteIndented = true }));
+                }
+                catch (System.Exception e)
+                {
+                    ModHelper.Error<Mod>($"{ids[i]}: {e.Message}");  // one bad map should not end the run
+                }
                 InGame.instance.QuitToMainMenu();
             }
             else Log($"{ids[i]} did not load, skipped");
@@ -218,7 +225,7 @@ public class Mod : BloonsTD6Mod
         return new
         {
             paths, removables, blockers = map.blockers?.Length ?? 0, speed = map.mapWideBloonSpeed,
-            peninsula = map.isPeninsula, regenRemovables = map.regenRemovables,
+            regenRemovables = map.regenRemovables,
             behaviours,
         };
     }
