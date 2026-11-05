@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
@@ -6,7 +7,6 @@ using BTD_Mod_Helper.Api.Helpers;
 using BTD_Mod_Helper.Extensions;
 using Il2CppAssets.Scripts.Models;
 using Il2CppAssets.Scripts.Models.Bloons;
-using Il2CppAssets.Scripts.Models.Map;
 using Il2CppAssets.Scripts.Models.Towers;
 using Il2CppAssets.Scripts.Simulation;
 using Il2CppAssets.Scripts.Unity.UI_New.InGame;
@@ -23,12 +23,41 @@ namespace KnowledgeDumper;
 
 // Open the Monkey Knowledge screen, press F6: writes the tree layout (button and arrow positions)
 // and every knowledge icon to <game>/KnowledgeLayout/ for the tech wiki.
+// Ctrl+Shift+F6 from the main menu does it all: opens Monkey Knowledge, dumps, starts a sandbox match, dumps the XP data.
 public class Mod : BloonsTD6Mod
 {
     public override void OnUpdate()
     {
-        if (Input.GetKeyDown(KeyCode.F6)) Dump();
+        var combo = Input.GetKey(KeyCode.LeftControl) && Input.GetKey(KeyCode.LeftShift);
+        if (Input.GetKeyDown(KeyCode.F6)) { if (combo) MelonCoroutines.Start(Auto()); else Dump(); }
         if (Input.GetKeyDown(KeyCode.F7)) MelonCoroutines.Start(Icons.Dump());
+    }
+
+    static bool KnowledgeOpen()
+    {
+        foreach (var b in UnityEngine.Resources.FindObjectsOfTypeAll<KnowledgeSkillBtn>())
+            if (b.gameObject.scene.IsValid() && !string.IsNullOrEmpty(b.knowledgeID)) return true;
+        return false;
+    }
+
+    static bool InMatch() => InGame.instance != null && InGame.instance.bridge != null && InGame.instance.bridge.simulation != null;
+
+    static IEnumerator Auto()
+    {
+        Il2CppAssets.Scripts.Unity.Menu.MenuManager.instance.OpenMenu("KnowledgeMain", null, false);
+        for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && !KnowledgeOpen();) yield return null;
+        yield return new WaitForSecondsRealtime(1);  // let the tree lay itself out before reading positions
+        Dump();
+        // sandbox: a new standard game here could replace a saved game on this map
+        var data = InGameData.Editable;
+        data.selectedMode = "Sandbox";
+        data.selectedMap = "Tutorial";  // Monkey Meadow
+        data.selectedDifficulty = "Easy";
+        Il2CppAssets.Scripts.Unity.UI_New.UI.instance.LoadGame(null, null, null, false, false);
+        for (var end = Time.realtimeSinceStartup + 60; Time.realtimeSinceStartup < end && !InMatch();) yield return null;
+        yield return new WaitForSecondsRealtime(1);
+        if (InMatch()) DumpInGame(Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout"));
+        else ModHelper.Msg<Mod>("Match did not start in 60 s, press F6 inside a match for the XP data.");
     }
 
     static float[] Rect(RectTransform rt)
@@ -91,7 +120,7 @@ public class Mod : BloonsTD6Mod
         // the static array is indexed by the MapDifficulty enum
         var scales = new Dictionary<string, float>();
         var table = Simulation.trackDifficultyXpScale;
-        foreach (var v in System.Enum.GetValues(typeof(MapModel).GetProperty("mapDifficulty").PropertyType))
+        foreach (var v in System.Enum.GetValues(typeof(Il2CppAssets.Scripts.Data.MapSets.MapDifficulty)))
         {
             var i = System.Convert.ToInt32(v);
             if (table != null && i >= 0 && i < table.Length) scales[v.ToString()] = table[i];
