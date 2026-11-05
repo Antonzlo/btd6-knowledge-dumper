@@ -173,14 +173,14 @@ public class Mod : BloonsTD6Mod
         {
             status = $"Knowledge Dumper maps {i + 1}/{ids.Count}: {ids[i]} (Ctrl+Shift+F9 stops)";
             Log(status);
-            yield return ToMainMenu();  // like the auto dump: LoadGame right over MainMenuUi bounces back to the menu
+            yield return ToMainMenu(0.2f);  // like the auto dump: LoadGame right over MainMenuUi bounces back to the menu
             var data = InGameData.Editable;
             data.selectedMode = "Sandbox";
             data.selectedMap = ids[i];
             data.selectedDifficulty = "Easy";
             Il2CppAssets.Scripts.Unity.UI_New.UI.instance.LoadGame(null, null, null, false, false);
             for (var end = Time.realtimeSinceStartup + 60; Time.realtimeSinceStartup < end && !InMatch();) yield return null;
-            yield return new WaitForSecondsRealtime(1);
+            yield return new WaitForSecondsRealtime(0.2f);
             if (InMatch())
             {
                 try
@@ -198,7 +198,7 @@ public class Mod : BloonsTD6Mod
             for (var end = Time.realtimeSinceStartup + 60;
                  Time.realtimeSinceStartup < end && (InMatch() || Menus.IsTransitioning || Menus.GetCurrentMenuName() != "MainMenuUi");)
                 yield return null;
-            yield return new WaitForSecondsRealtime(1);
+            yield return new WaitForSecondsRealtime(0.2f);
         }
         mapsRunning = false;
         yield return Finish($"Knowledge Dumper: {done.Count} maps in maps.json" + (mapsStop ? " (stopped)" : ""));
@@ -250,11 +250,11 @@ public class Mod : BloonsTD6Mod
         };
     }
 
-    static IEnumerator ToMainMenu()
+    static IEnumerator ToMainMenu(float settle = 1)
     {
         Menus.CloseAllMenus();
         for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && Menus.IsTransitioning;) yield return null;
-        yield return new WaitForSecondsRealtime(1);
+        yield return new WaitForSecondsRealtime(settle);
         Log("closed menus");
     }
 
