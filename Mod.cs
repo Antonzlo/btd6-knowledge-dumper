@@ -210,7 +210,14 @@ public class Mod : BloonsTD6Mod
         foreach (var p in map.paths)
         {
             if (p == null || !p.isActive || p.isHidden || p.points == null || p.points.Length == 0) continue;
-            paths.Add(p.points[p.points.Length - 1].distance);  // distance runs along the path, the last point holds its length
+            float length = 0;  // PointInfo.distance is not the running length (it read 0), so sum the segments
+            for (var k = 1; k < p.points.Length; k++)
+            {
+                var a = p.points[k - 1].point;
+                var b = p.points[k].point;
+                length += (float)System.Math.Sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y));
+            }
+            paths.Add(length);
         }
         var removables = new List<object>();
         if (map.removeables != null)
@@ -220,12 +227,16 @@ public class Mod : BloonsTD6Mod
         if (map.mapBehaviours != null)
             foreach (var b in map.mapBehaviours)
                 if (b != null) behaviours.Add(b.GetIl2CppType().Name);
+        var events = new List<string>();
+        if (map.mapEvents != null)
+            foreach (var e in map.mapEvents)
+                if (e != null) events.Add(e.GetIl2CppType().Name);
         if (map.simBehaviors != null)
             foreach (var b in map.simBehaviors)
                 if (b != null) behaviours.Add(b.GetIl2CppType().Name);
         return new
         {
-            paths, removables, blockers = map.blockers?.Length ?? 0, speed = map.mapWideBloonSpeed,
+            paths, removables, speed = map.mapWideBloonSpeed, events,
             regenRemovables = map.regenRemovables,
             behaviours,
         };
