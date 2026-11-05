@@ -23,10 +23,33 @@ namespace KnowledgeDumper;
 
 // Open the Monkey Knowledge screen, press F6: writes the tree layout (button and arrow positions)
 // and every knowledge icon to <game>/KnowledgeLayout/ for the tech wiki.
-// Ctrl+Shift+F6 from the main menu does it all: opens Monkey Knowledge, dumps, starts a sandbox match, dumps the XP data.
+// Ctrl+Shift+F6 from the main menu does it all: Monkey Knowledge tree, hero screen, a sandbox match for the XP data,
+// then back to the main menu, with the progress shown on screen.
 public class Mod : BloonsTD6Mod
 {
     static string lastMenu;
+    static string status;  // auto dump progress, drawn on screen while set
+
+    public override void OnGUI()
+    {
+        if (status == null) return;
+        GUI.skin.box.fontSize = 22;
+        GUI.Box(new Rect(Screen.width / 2f - 300, 24, 600, 44), status);
+    }
+
+    static void Step(int n, string text)
+    {
+        status = $"Knowledge Dumper {n}/5: {text}";
+        Log(status);
+    }
+
+    static IEnumerator Finish(string text)
+    {
+        status = text;
+        Log(text);
+        yield return new WaitForSecondsRealtime(4);
+        status = null;
+    }
 
     public override void OnUpdate()
     {
@@ -69,7 +92,7 @@ public class Mod : BloonsTD6Mod
 
     static IEnumerator Auto()
     {
-        Log("auto dump start");
+        Step(1, "opening Monkey Knowledge");
         Menus.OpenMenu("KnowledgeMainUI", null, false);
         // KnowledgeMain is the category picker; OpenPage is what a category button calls to show the tree
         KnowledgeMain main = null;
@@ -81,16 +104,17 @@ public class Mod : BloonsTD6Mod
         }
         if (main == null)
         {
-            ModHelper.Msg<Mod>("Monkey Knowledge menu did not open.");
+            yield return Finish("Knowledge Dumper: Monkey Knowledge menu did not open");
             yield break;
         }
         Log("knowledge picker open");
         main.OpenPage(0);
         for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && !KnowledgeOpen();) yield return null;
-        Log(KnowledgeOpen() ? "knowledge tree open" : "knowledge tree did not open");
+        Step(2, KnowledgeOpen() ? "dumping the knowledge tree" : "knowledge tree did not open");
         yield return new WaitForSecondsRealtime(1);  // let the tree lay itself out before reading positions
         Dump();
         // hero select screen: game.json then gets the order of its hero buttons
+        Step(3, "hero screen");
         yield return ToMainMenu();
         Menus.OpenMenu("HeroDetailsUI", null, false);
         for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && HeroScreen().Count == 0;) yield return null;
@@ -98,6 +122,7 @@ public class Mod : BloonsTD6Mod
         Log($"hero screen: {HeroScreen().Count} heroes");
         DumpGame(Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout"));
         // a match must start from the main menu: loading it over another menu leaves an empty blurred screen
+        Step(4, "starting a sandbox match");
         yield return ToMainMenu();
         // sandbox: a new standard game here could replace a saved game on this map
         var data = InGameData.Editable;
@@ -108,9 +133,16 @@ public class Mod : BloonsTD6Mod
         Log("match loading");
         for (var end = Time.realtimeSinceStartup + 60; Time.realtimeSinceStartup < end && !InMatch();) yield return null;
         yield return new WaitForSecondsRealtime(1);
-        Log("match wait over");
-        if (InMatch()) DumpInGame(Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout"));
-        else ModHelper.Msg<Mod>("Match did not start in 60 s, press F6 inside a match for the XP data.");
+        if (!InMatch())
+        {
+            yield return Finish("Knowledge Dumper: match did not start in 60 s, press F6 inside a match for the XP data");
+            yield break;
+        }
+        Step(5, "dumping hero XP, back to the main menu");
+        DumpInGame(Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout"));
+        Menus.GoToMainMenu();
+        for (var end = Time.realtimeSinceStartup + 60; Time.realtimeSinceStartup < end && InMatch();) yield return null;
+        yield return Finish("Knowledge Dumper: done, files in <game>/KnowledgeLayout");
     }
 
     static IEnumerator ToMainMenu()
