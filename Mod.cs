@@ -173,6 +173,7 @@ public class Mod : BloonsTD6Mod
         {
             status = $"Knowledge Dumper maps {i + 1}/{ids.Count}: {ids[i]} (Ctrl+Shift+F9 stops)";
             Log(status);
+            yield return ToMainMenu();  // like the auto dump: LoadGame right over MainMenuUi bounces back to the menu
             var data = InGameData.Editable;
             data.selectedMode = "Sandbox";
             data.selectedMap = ids[i];
