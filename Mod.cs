@@ -227,17 +227,25 @@ public class Mod : BloonsTD6Mod
         if (map.mapBehaviours != null)
             foreach (var b in map.mapBehaviours)
                 if (b != null) behaviours.Add(b.GetIl2CppType().Name);
+        // each event as "TriggerA+TriggerB > ActionA+ActionB", model type names without the Model suffix
+        static string Names(IEnumerable<Il2CppSystem.Object> items) => items == null ? "" : string.Join("+",
+            System.Linq.Enumerable.Select(System.Linq.Enumerable.Where(items, x => x != null),
+                x => x.GetIl2CppType().Name.Replace("Model", "")));
         var events = new List<string>();
         if (map.mapEvents != null)
             foreach (var e in map.mapEvents)
-                if (e != null) events.Add(e.GetIl2CppType().Name);
+                if (e != null) events.Add($"{Names(e.triggers)} > {Names(e.actions)}");
+        var regen = new List<string>();
+        if (map.regenRemovables != null)
+            foreach (var r in map.regenRemovables)
+                if (r != null) regen.Add(r.GetIl2CppType().Name);
         if (map.simBehaviors != null)
             foreach (var b in map.simBehaviors)
                 if (b != null) behaviours.Add(b.GetIl2CppType().Name);
         return new
         {
             paths, removables, speed = map.mapWideBloonSpeed, events,
-            regenRemovables = map.regenRemovables,
+            regenRemovables = regen,
             behaviours,
         };
     }
