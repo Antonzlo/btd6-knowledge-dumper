@@ -26,8 +26,12 @@ namespace KnowledgeDumper;
 // Ctrl+Shift+F6 from the main menu does it all: opens Monkey Knowledge, dumps, starts a sandbox match, dumps the XP data.
 public class Mod : BloonsTD6Mod
 {
+    static string lastMenu;
+
     public override void OnUpdate()
     {
+        var menu = Menus != null ? Menus.GetCurrentMenuName() : null;
+        if (menu != lastMenu) ModHelper.Msg<Mod>($"menu: {lastMenu = menu}");
         var combo = Input.GetKey(KeyCode.LeftControl) && Input.GetKey(KeyCode.LeftShift);
         if (Input.GetKeyDown(KeyCode.F6)) { if (combo) MelonCoroutines.Start(Auto()); else Dump(); }
         if (Input.GetKeyDown(KeyCode.F7)) MelonCoroutines.Start(Icons.Dump());
@@ -42,9 +46,16 @@ public class Mod : BloonsTD6Mod
 
     static bool InMatch() => InGame.instance != null && InGame.instance.bridge != null && InGame.instance.bridge.simulation != null;
 
+    static Il2CppAssets.Scripts.Unity.Menu.MenuManager Menus => Il2CppAssets.Scripts.Unity.Menu.MenuManager.instance;
+
+    // every step names the current menu, so a stuck auto dump shows where it stopped
+    static void Log(string step) =>
+        ModHelper.Msg<Mod>($"{step} (menu: {(Menus != null ? Menus.GetCurrentMenuName() : "none")}, in match: {InMatch()})");
+
     static IEnumerator Auto()
     {
-        Il2CppAssets.Scripts.Unity.Menu.MenuManager.instance.OpenMenu("KnowledgeMain", null, false);
+        Log("auto dump start");
+        Menus.OpenMenu("KnowledgeMain", null, false);
         // KnowledgeMain is the category picker; OpenPage is what a category button calls to show the tree
         KnowledgeMain main = null;
         for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && main == null;)
@@ -58,18 +69,27 @@ public class Mod : BloonsTD6Mod
             ModHelper.Msg<Mod>("Monkey Knowledge menu did not open.");
             yield break;
         }
+        Log("knowledge picker open");
         main.OpenPage(0);
         for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && !KnowledgeOpen();) yield return null;
+        Log(KnowledgeOpen() ? "knowledge tree open" : "knowledge tree did not open");
         yield return new WaitForSecondsRealtime(1);  // let the tree lay itself out before reading positions
         Dump();
+        // a match must start from the main menu: loading it over the knowledge tree leaves an empty blurred screen
+        Menus.CloseAllMenus();
+        for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && Menus.IsTransitioning;) yield return null;
+        yield return new WaitForSecondsRealtime(1);
+        Log("closed menus");
         // sandbox: a new standard game here could replace a saved game on this map
         var data = InGameData.Editable;
         data.selectedMode = "Sandbox";
         data.selectedMap = "Tutorial";  // Monkey Meadow
         data.selectedDifficulty = "Easy";
         Il2CppAssets.Scripts.Unity.UI_New.UI.instance.LoadGame(null, null, null, false, false);
+        Log("match loading");
         for (var end = Time.realtimeSinceStartup + 60; Time.realtimeSinceStartup < end && !InMatch();) yield return null;
         yield return new WaitForSecondsRealtime(1);
+        Log("match wait over");
         if (InMatch()) DumpInGame(Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout"));
         else ModHelper.Msg<Mod>("Match did not start in 60 s, press F6 inside a match for the XP data.");
     }
