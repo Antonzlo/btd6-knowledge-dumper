@@ -49,6 +49,9 @@ public static class Icons
         foreach (var u in model.upgrades) refs.Add(("upgrades", u.name, u.icon));
         foreach (var b in model.bloons) refs.Add(("bloons", b.id, b.icon));
         foreach (var p in model.powers) refs.Add(("powers", p.name, p.icon));
+        // achievement icons by achievement id (achievements.json has the same ids)
+        foreach (var a in Il2CppAssets.Scripts.Data.GameData.Instance.achievements.achievements)
+            refs.Add(("achievements", a.achievementId.ToString(), a.achievementIcon));
         // buff indicator icons: the game's buffId -> sprite table, so heroes you do not own are included
         foreach (var b in Il2CppAssets.Scripts.Data.GameData.Instance.buffIconSprites.buffIconSprites)
             refs.Add(("buffs", b.buffId, b.icon));
