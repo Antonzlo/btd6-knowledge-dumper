@@ -34,7 +34,7 @@ public class Mod : BloonsTD6Mod
         if (menu != lastMenu) ModHelper.Msg<Mod>($"menu: {lastMenu = menu}");
         var combo = Input.GetKey(KeyCode.LeftControl) && Input.GetKey(KeyCode.LeftShift);
         if (Input.GetKeyDown(KeyCode.F6)) { if (combo) MelonCoroutines.Start(Auto()); else Dump(); }
-        if (Input.GetKeyDown(KeyCode.F7)) MelonCoroutines.Start(Icons.Dump());
+        if (Input.GetKeyDown(KeyCode.F7)) { if (combo) WhereAmI(); else MelonCoroutines.Start(Icons.Dump()); }
     }
 
     static bool KnowledgeOpen()
@@ -51,6 +51,21 @@ public class Mod : BloonsTD6Mod
     // every step names the current menu, so a stuck auto dump shows where it stopped
     static void Log(string step) =>
         ModHelper.Msg<Mod>($"{step} (menu: {(Menus != null ? Menus.GetCurrentMenuName() : "none")}, in match: {InMatch()})");
+
+    // Ctrl+Shift+F7: scene, open menus with the data each was opened with, and the picked map/mode,
+    // to learn the ids a scripted step needs
+    static void WhereAmI()
+    {
+        if (Menus == null) { ModHelper.Msg<Mod>("where: no MenuManager yet"); return; }
+        ModHelper.Msg<Mod>($"where: scene {Menus.CurrentScene}, menu {Menus.GetCurrentMenuName()}, previous {Menus.GetPreviousMenuName()}, in match {InMatch()}");
+        foreach (var entry in Menus.GetMenuStack())
+        {
+            var data = entry.Item2;
+            ModHelper.Msg<Mod>($"  stack: {entry.Item1}, data {(data == null ? "null" : data.GetIl2CppType().FullName + " = " + data.ToString())}");
+        }
+        var d = InGameData.Editable;
+        if (d != null) ModHelper.Msg<Mod>($"  picked: map {d.selectedMap}, mode {d.selectedMode}, difficulty {d.selectedDifficulty}");
+    }
 
     static IEnumerator Auto()
     {
