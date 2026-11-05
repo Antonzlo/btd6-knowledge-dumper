@@ -5,6 +5,7 @@ using System.Text.Json;
 using BTD_Mod_Helper;
 using BTD_Mod_Helper.Api.Helpers;
 using BTD_Mod_Helper.Extensions;
+using Il2CppAssets.Scripts.Data;
 using Il2CppAssets.Scripts.Models;
 using Il2CppAssets.Scripts.Models.Bloons;
 using Il2CppAssets.Scripts.Models.Towers;
@@ -212,6 +213,25 @@ public class Mod : BloonsTD6Mod
             },
             new JsonSerializerOptions { WriteIndented = true }));
         ModHelper.Msg<Mod>($"Dumped {towers.Count} towers, version {Application.version}");
+        DumpAchievements(dir);
+    }
+
+    // achievements.json: every achievement with its goal, hidden flag and rewards. Names and descriptions are in
+    // textTable (the wiki reads them there); what completes one is game code, not data.
+    static void DumpAchievements(string dir)
+    {
+        var list = new List<object>();
+        foreach (var a in GameData.Instance.achievements.achievements)
+        {
+            list.Add(new
+            {
+                id = a.achievementId, goal = a.achievementGoal, hidden = a.hidden, coop = a.isCoop,
+                type = a.type.ToString(), subscript = a.subscript, loot = a.loot  // loot: id of the reward set
+            });
+        }
+        File.WriteAllText(Path.Combine(dir, "achievements.json"),
+            JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true }));
+        ModHelper.Msg<Mod>($"Dumped {list.Count} achievements");
     }
 
     // Only inside a match (GetXpForRound fails in the menu): hero XP per round and the XP scale of each map difficulty.
