@@ -31,23 +31,26 @@ public class Mod : BloonsTD6Mod
 {
     static string lastMenu;
     static string status;  // auto dump progress, drawn on screen while set
+    static float progress = -1;  // 0..1 for the bar, -1 hides it
 
     public override void OnGUI()
     {
-        if (status == null) return;
+        if (status == null || !Overlay.Failed) return;  // the game-style overlay draws it; this box is the fallback
         GUI.skin.box.fontSize = 22;
         GUI.Box(new Rect(Screen.width / 2f - 300, 24, 600, 44), status);
     }
 
     static void Step(int n, string text)
     {
-        status = $"Knowledge Dumper {n}/5: {text}";
+        status = $"{n}/5: {text}";
+        progress = (n - 1) / 5f;
         Log(status);
     }
 
     static IEnumerator Finish(string text)
     {
         status = text;
+        progress = -1;
         Log(text);
         yield return new WaitForSecondsRealtime(4);
         status = null;
@@ -57,12 +60,14 @@ public class Mod : BloonsTD6Mod
     {
         var menu = Menus != null ? Menus.GetCurrentMenuName() : null;
         if (menu != lastMenu) ModHelper.Msg<Mod>($"menu: {lastMenu = menu}");
+        Overlay.Show(status, progress);
         var combo = Input.GetKey(KeyCode.LeftControl) && Input.GetKey(KeyCode.LeftShift);
         if (Input.GetKeyDown(KeyCode.F6)) { if (combo) MelonCoroutines.Start(Auto()); else Dump(); }
         if (Input.GetKeyDown(KeyCode.F7)) { if (combo) WhereAmI(); else MelonCoroutines.Start(Icons.Dump()); }
-        if (combo && Input.GetKeyDown(KeyCode.F9))
+        if (Input.GetKeyDown(KeyCode.F9))
         {
-            if (mapsRunning) mapsStop = true;
+            if (!combo) { if (InMatch()) DumpCurrentMap(); }
+            else if (mapsRunning) mapsStop = true;
             else MelonCoroutines.Start(AutoMaps());
         }
     }
@@ -156,22 +161,57 @@ public class Mod : BloonsTD6Mod
 
     // Ctrl+Shift+F9 from the main menu: loads every map in a sandbox match and writes a summary of its MapModel
     // (paths, removable obstacles, line of sight blockers, map behaviours) to maps.json. The MapModel only exists while
-    // its map is loaded, so there is no way around loading each one. Maps already in the file are skipped, so a run
+    // its map is loaded, so there is no way around loading each one (plain F9 in a match dumps only that map). Maps already in the file are skipped, so a run
     // that stopped continues where it left off; pressing the keys again stops after the current map.
+    static string MapsPath => Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout", "maps.json");
+    static string GeoPath => Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout", "maps_geo.json");
+
+    static Dictionary<string, JsonElement> LoadMaps(string path)
+    {
+        var d = new Dictionary<string, JsonElement>();
+        if (File.Exists(path))
+            foreach (var p in JsonDocument.Parse(File.ReadAllText(path)).RootElement.EnumerateObject()) d[p.Name] = p.Value.Clone();
+        return d;
+    }
+
+    // adds the loaded map to maps.json and maps_geo.json, replacing an older entry of it
+    static void SaveMap(string id, Dictionary<string, JsonElement> done, Dictionary<string, JsonElement> geo)
+    {
+        var map = InGame.instance.bridge.simulation.model.map;
+        done[id] = JsonSerializer.SerializeToElement(MapSummary(map));
+        File.WriteAllText(MapsPath, JsonSerializer.Serialize(done, new JsonSerializerOptions { WriteIndented = true }));
+        geo[id] = JsonSerializer.SerializeToElement(MapGeo(map));
+        File.WriteAllText(GeoPath, JsonSerializer.Serialize(geo));  // compact: thousands of points
+    }
+
+    // F9 inside a match: dump just the map being played (any mode or difficulty, browser-only maps too)
+    static void DumpCurrentMap()
+    {
+        var id = InGameData.CurrentGame.selectedMap;
+        try
+        {
+            SaveMap(id, LoadMaps(MapsPath), LoadMaps(GeoPath));
+            MelonCoroutines.Start(Finish($"Map {id} written to maps.json and maps_geo.json"));
+        }
+        catch (System.Exception e)
+        {
+            ModHelper.Error<Mod>($"{id}: {e.Message}");
+        }
+    }
+
     static IEnumerator AutoMaps()
     {
         mapsRunning = true;
         mapsStop = false;
-        var path = Path.Combine(MelonEnvironment.GameRootDirectory, "KnowledgeLayout", "maps.json");
-        var done = new Dictionary<string, JsonElement>();
-        if (File.Exists(path))
-            foreach (var p in JsonDocument.Parse(File.ReadAllText(path)).RootElement.EnumerateObject()) done[p.Name] = p.Value.Clone();
+        var done = LoadMaps(MapsPath);
+        var geo = LoadMaps(GeoPath);
         var ids = new List<string>();
         foreach (var m in GameData.Instance.mapSet.Maps.items)
-            if (!m.isDebug && !m.isBrowserOnly && !done.ContainsKey(m.id)) ids.Add(m.id);  // browser-only: editor stub and web maps
+            if (!m.isDebug && !m.isBrowserOnly && !(done.ContainsKey(m.id) && geo.ContainsKey(m.id))) ids.Add(m.id);  // browser-only: editor stub and web maps
         for (var i = 0; i < ids.Count && !mapsStop; i++)
         {
-            status = $"Knowledge Dumper maps {i + 1}/{ids.Count}: {ids[i]} (Ctrl+Shift+F9 stops)";
+            status = $"Maps {i + 1}/{ids.Count}: {ids[i]} (Ctrl+Shift+F9 stops)";
+            progress = (float)i / ids.Count;
             Log(status);
             yield return ToMainMenu();  // like the auto dump: LoadGame right over MainMenuUi bounces back to the menu
             var data = InGameData.Editable;
@@ -185,8 +225,7 @@ public class Mod : BloonsTD6Mod
             {
                 try
                 {
-                    done[ids[i]] = JsonSerializer.SerializeToElement(MapSummary(InGame.instance.bridge.simulation.model.map));
-                    File.WriteAllText(path, JsonSerializer.Serialize(done, new JsonSerializerOptions { WriteIndented = true }));
+                    SaveMap(ids[i], done, geo);
                 }
                 catch (System.Exception e)
                 {
@@ -201,7 +240,167 @@ public class Mod : BloonsTD6Mod
             yield return new WaitForSecondsRealtime(1);
         }
         mapsRunning = false;
-        yield return Finish($"Knowledge Dumper: {done.Count} maps in maps.json" + (mapsStop ? " (stopped)" : ""));
+        yield return Finish($"{done.Count} maps in maps.json" + (mapsStop ? " (stopped)" : ""));
+    }
+
+    // Map geometry for the wiki's map viewer, in sim coordinates rounded to 0.1: path points, area polygons
+    // (type is the AreaType name: Land, Water, Track, Unplaceable...; holes cut out of them), line of sight blockers as
+    // [x, y, radius] and removable obstacles (position and the ids of the areas that go away with them).
+    static float R(float v) => (float)System.Math.Round(v, 1);
+
+    static object MapGeo(MapModel map)
+    {
+        var paths = new List<object>();
+        foreach (var p in map.paths)
+        {
+            if (p == null || p.points == null) continue;
+            var pts = new List<float[]>();
+            foreach (var q in p.points) pts.Add(new[] { R(q.point.x), R(q.point.y) });
+            paths.Add(new { id = p.pathId, active = p.isActive, hidden = p.isHidden, points = pts });
+        }
+        var areas = new List<object>();
+        if (map.areas != null)
+            foreach (var a in map.areas)
+                if (a != null) areas.Add(new { id = a.id.Id, name = a.name, type = a.type.ToString(), height = R(a.height), blocker = a.isBlocker, disabled = a.isDisabled, points = Poly(a.polygon), holes = Holes(a.holes) });
+        var blockers = new List<object>();
+        if (map.blockers != null)
+            foreach (var b in map.blockers)
+                if (b != null && !b.isDisabled) blockers.Add(new[] { R(b.circle.position.x), R(b.circle.position.y), R(b.circle.radius) });
+        var removables = new List<object>();
+        if (map.removeables != null)
+            foreach (var r in map.removeables)
+                if (r != null) removables.Add(new { name = r.menuName, obj = r.objecName, model = r.name, cost = r.removealCost, x = R(r.position.x), y = R(r.position.y), areas = Ids(r.ids) });
+        // spawner with its splitters (which path each bloon takes: MOAB-only, by tag, by round...), every subtype as is
+        var spawner = map.spawner == null ? (JsonElement?)null : JsonDocument.Parse(ModelSerializer.SerializeModel(map.spawner)).RootElement.Clone();
+        // map events with their settings: trigger (round number, obstacle id, timer...) and actions (path or area ids)
+        var events = new List<JsonElement>();
+        if (map.mapEvents != null)
+            foreach (var e in map.mapEvents)
+                if (e != null) events.Add(JsonDocument.Parse(ModelSerializer.SerializeModel(e)).RootElement.Clone());
+        var gizmos = new List<JsonElement>();
+        if (map.gizmos != null)
+            foreach (var gz in map.gizmos)
+                if (gz != null) gizmos.Add(JsonDocument.Parse(ModelSerializer.SerializeModel(gz)).RootElement.Clone());
+        return new { paths, areas, blockers, removables, spawner, events, gizmos, interactables = Interactables(events), towers = PlacedTowers() };
+    }
+
+    // towers standing on the map when it is dumped (F9 in a match after placing some): ground truth for the wiki's
+    // placement check. Footprint as the model has it: radius for a circle, width and height for a rectangle.
+    static List<object> PlacedTowers()
+    {
+        var list = new List<object>();
+        foreach (var t in InGame.instance.GetTowers())
+        {
+            if (t?.towerModel == null || t.towerModel.isSubTower) continue;  // sub towers (drones, pets) have no placement
+            var fp = t.towerModel.footprint;
+            var circle = fp?.TryCast<Il2CppAssets.Scripts.Models.Towers.Behaviors.CircleFootprintModel>();
+            var rect = fp?.TryCast<Il2CppAssets.Scripts.Models.Towers.Behaviors.RectangleFootprintModel>();
+            list.Add(new
+            {
+                id = t.towerModel.baseId, x = R(t.Position.X), y = R(t.Position.Y),
+                r = circle != null ? R(circle.radius) : 0f, w = rect != null ? R(rect.xWidth) : 0f, h = rect != null ? R(rect.yWidth) : 0f,
+            });
+        }
+        return list;
+    }
+
+    // click targets of map events are scene objects, named in the triggers: the bounds of their colliders, to place
+    // them on the map (map x = world x, map y = -world z)
+    static Dictionary<string, List<float[]>> Interactables(List<JsonElement> events)
+    {
+        var names = new HashSet<string>();
+        void Scan(JsonElement e)
+        {
+            if (e.ValueKind == JsonValueKind.Object)
+                foreach (var p in e.EnumerateObject())
+                {
+                    if ((p.Name == "interactableName" || p.Name == "interactableClickSequenceName") && p.Value.ValueKind == JsonValueKind.String)
+                        names.Add(p.Value.GetString());
+                    Scan(p.Value);
+                }
+            else if (e.ValueKind == JsonValueKind.Array)
+                foreach (var x in e.EnumerateArray()) Scan(x);
+        }
+        foreach (var e in events) Scan(e);
+        var found = new Dictionary<string, List<float[]>>();
+        if (names.Count == 0) return found;
+        foreach (var tr in UnityEngine.Resources.FindObjectsOfTypeAll<Transform>())
+        {
+            if (tr == null || !names.Contains(tr.name) || found.ContainsKey(tr.name) || !tr.gameObject.scene.IsValid()) continue;
+            // the named object carries an InteractableClick (or a sequence of them, in click order); the click lands
+            // on its onClickHandler's collider
+            var list = new List<float[]>();
+            var seq = tr.GetComponent<Il2CppAssets.Scripts.Unity.Map.Effects.InteractableClickSequence>();
+            var seqTrig = tr.GetComponent<Il2CppAssets.Scripts.Unity.Map.Triggers.InteractableClickSequenceTrigger>();
+            if (seq == null && seqTrig != null) seq = seqTrig.interactableClickSequence;
+            if (seq != null && seq.sequence != null)
+            {
+                foreach (var it in seq.sequence)
+                    if (it != null) list.Add(ClickBounds(it)[0]);  // one spot per step: a step clicked twice repeats
+            }
+            else list.AddRange(ClickBounds(tr));
+            found[tr.name] = list;
+        }
+        return found;
+    }
+
+    // a disabled collider (a button that turns on later) reports empty bounds at its object's position, so boxes and
+    // spheres are measured from their own settings, which hold either way
+    static float[] Bounds(Collider col)
+    {
+        var t = col.transform;
+        var box = col.TryCast<BoxCollider>();
+        if (box != null)
+        {
+            var c = t.TransformPoint(box.center);
+            var size = Vector3.Scale(box.size, t.lossyScale);
+            return new[] { R(c.x), R(c.y), R(c.z), R(System.Math.Abs(size.x)), R(System.Math.Abs(size.z)) };
+        }
+        var sphere = col.TryCast<SphereCollider>();
+        if (sphere != null)
+        {
+            var c = t.TransformPoint(sphere.center);
+            var d = 2 * sphere.radius * System.Math.Max(System.Math.Abs(t.lossyScale.x), System.Math.Abs(t.lossyScale.z));
+            return new[] { R(c.x), R(c.y), R(c.z), R(d), R(d) };
+        }
+        var b = col.bounds;
+        return new[] { R(b.center.x), R(b.center.y), R(b.center.z), R(b.size.x), R(b.size.z) };
+    }
+
+    // bounds [center x, y, z, size x, size z] of what takes the click: an InteractableClick's onClickHandler
+    // colliders, else the colliders under the object, else its position with size 0
+    static List<float[]> ClickBounds(Component c)
+    {
+        var ic = c.GetComponent<Il2CppAssets.Scripts.Unity.Map.Effects.InteractableClick>();
+        Component target = ic != null && ic.onClickHandler != null ? ic.onClickHandler : c;
+        var list = new List<float[]>();
+        foreach (var col in target.GetComponentsInChildren<Collider>(true))
+            list.Add(Bounds(col));
+        if (list.Count == 0)
+            list.Add(new[] { R(target.transform.position.x), R(target.transform.position.y), R(target.transform.position.z), 0f, 0f });
+        return list;
+    }
+
+    static List<List<float[]>> Holes(IEnumerable<Il2CppAssets.Scripts.Simulation.SMath.Polygon> holes)
+    {
+        var list = new List<List<float[]>>();
+        if (holes != null) foreach (var h in holes) list.Add(Poly(h));
+        return list;
+    }
+
+    static List<int> Ids(Il2CppSystem.Collections.Generic.List<Il2CppAssets.Scripts.ObjectId> ids)
+    {
+        var list = new List<int>();
+        if (ids != null) for (var k = 0; k < ids.Count; k++) list.Add(ids[k].Id);
+        return list;
+    }
+
+    static List<float[]> Poly(Il2CppAssets.Scripts.Simulation.SMath.Polygon poly)
+    {
+        var pts = new List<float[]>();
+        if (poly?.points != null)
+            foreach (var v in poly.points) pts.Add(new[] { R(v.x), R(v.y) });
+        return pts;
     }
 
     static object MapSummary(MapModel map)
