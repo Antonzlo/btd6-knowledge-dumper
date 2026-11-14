@@ -1,8 +1,10 @@
 namespace KnowledgeDumper;
 
-// Read by Mod Helper for the Mods screen
+// Read by Mod Helper for the Mods screen and the Mod Browser
 public static class ModHelperData
 {
+    public const string RepoOwner = "Antonzlo";
+    public const string RepoName = "btd6-knowledge-dumper";
     public const string WorksOnVersion = "57.4";
     public const string Version = "0.1.0";
     public const string Name = "Knowledge Dumper";
