@@ -11,6 +11,7 @@ using Il2CppAssets.Scripts.Models.Bloons;
 using Il2CppAssets.Scripts.Models.Map;
 using Il2CppAssets.Scripts.Models.Towers;
 using Il2CppAssets.Scripts.Simulation;
+using Il2CppAssets.Scripts.Simulation.Freeplay;
 using Il2CppAssets.Scripts.Unity.UI_New.InGame;
 using Il2CppAssets.Scripts.Unity;
 using Il2CppAssets.Scripts.Unity.UI_New.Knowledge;
@@ -125,8 +126,16 @@ public class Mod : BloonsTD6Mod
         Step(2, KnowledgeOpen() ? "dumping the knowledge tree" : "knowledge tree did not open");
         yield return new WaitForSecondsRealtime(1);  // let the tree lay itself out before reading positions
         Dump();
+        // mode select screen (map and difficulty picked as the menus would): which difficulty each mode sits under
+        Step(3, "mode screen");
+        yield return ToMainMenu();
+        InGameData.Editable.selectedMap = "Tutorial";
+        InGameData.Editable.selectedDifficulty = "Easy";
+        Menus.OpenMenu("ModeSelectUI", null, false);
+        for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && ModeDifficulty().Count == 0;) yield return null;
+        lastModes = ModeDifficulty();
+        Log($"mode screen: {lastModes.Count} modes");
         // hero select screen: game.json then gets the order of its hero buttons
-        Step(3, "hero screen");
         yield return ToMainMenu();
         Menus.OpenMenu("HeroDetailsUI", null, false);
         for (var end = Time.realtimeSinceStartup + 15; Time.realtimeSinceStartup < end && HeroScreen().Count == 0;) yield return null;
@@ -482,6 +491,25 @@ public class Mod : BloonsTD6Mod
         return new[] { c.x, c.y, corners[2].x - corners[0].x, corners[2].y - corners[0].y };
     }
 
+    static Dictionary<string, string> lastModes = new();
+
+    // Which difficulty each mode sits under: the mode screen keeps one button group per difficulty, each button names
+    // its mode. Empty unless the mode screen has been loaded.
+    static Dictionary<string, string> ModeDifficulty()
+    {
+        var modes = new Dictionary<string, string>();
+        foreach (var ms in UnityEngine.Resources.FindObjectsOfTypeAll<Il2CppAssets.Scripts.Unity.UI_New.Main.ModeSelect.ModeScreen>())
+            foreach (var (diff, group) in new[] { ("Easy", ms.easyModes), ("Medium", ms.mediumModes), ("Hard", ms.hardModes) })
+                if (group != null)
+                    foreach (var b in group.GetComponentsInChildren<Il2CppAssets.Scripts.Unity.UI_New.Main.ModeSelect.ModeButton>(true))
+                        if (!string.IsNullOrEmpty(b.modeType) && b.modeType != diff)
+                            modes[b.modeType] = modes.TryGetValue(b.modeType, out var d) && d != diff ? "" : diff;
+        // Standard and Sandbox sit under every difficulty: not tied to one, left out
+        foreach (var k in new List<string>(modes.Keys))
+            if (modes[k] == "") modes.Remove(k);
+        return modes;
+    }
+
     // Facts the Mod Helper export lacks: game version, shop order of towers and heroes, bloon property bits, tower set bits.
     static void DumpGame(string dir)
     {
@@ -508,15 +536,25 @@ public class Mod : BloonsTD6Mod
         var setType = typeof(TowerModel).GetProperty("towerSet").PropertyType;
         foreach (var v in System.Enum.GetValues(setType))
             sets[v.ToString()] = System.Convert.ToInt32(v);
+        var modes = ModeDifficulty();
+        if (modes.Count == 0) modes = lastModes;  // read by Auto while the mode screen was open
+        if (modes.Count == 0 && File.Exists(path))  // mode screen never opened: keep the list from the last dump
+        {
+            var old = JsonDocument.Parse(File.ReadAllText(path)).RootElement;
+            if (old.TryGetProperty("modeDifficulty", out var md))
+                foreach (var p in md.EnumerateObject()) modes[p.Name] = p.Value.GetString();
+        }
         File.WriteAllText(path, JsonSerializer.Serialize(
             new
             {
                 version = Application.version, towerSet = towers, heroSet = heroes, heroScreen = screen, bloonProperties = props,
-                towerSets = sets
+                towerSets = sets,
+                modeDifficulty = modes
             },
             new JsonSerializerOptions { WriteIndented = true }));
         ModHelper.Msg<Mod>($"Dumped {towers.Count} towers, version {Application.version}");
         DumpAchievements(dir);
+        DumpRankXp(dir);
     }
 
     // achievements.json: every achievement with its goal, hidden flag and rewards. Names and descriptions are in
@@ -537,14 +575,35 @@ public class Mod : BloonsTD6Mod
         ModHelper.Msg<Mod>($"Dumped {list.Count} achievements");
     }
 
+    static void DumpRankXp(string dir)
+    {
+        var rankInfo = GameData.Instance.rankInfo;
+        var ranks = rankInfo?.rankInfo;
+        if (ranks == null || ranks.Count == 0)
+        {
+            ModHelper.Warning<Mod>("Rank XP table is unavailable");
+            return;
+        }
+
+        var totalXpNeeded = new List<long>(ranks.Count);
+        foreach (var rank in ranks)
+            totalXpNeeded.Add(rank.totalXpNeeded);
+
+        File.WriteAllText(Path.Combine(dir, "rank-xp.json"), JsonSerializer.Serialize(
+            new { version = Application.version, totalXpNeeded, rankInfo.xpNeededPerVeteranRank },
+            new JsonSerializerOptions { WriteIndented = true }));
+        ModHelper.Msg<Mod>($"Dumped XP thresholds for {totalXpNeeded.Count} rank entries");
+    }
+
     // Only inside a match (GetXpForRound fails in the menu): hero XP per round and the XP scale of each map difficulty.
     static void DumpInGame(string dir)
     {
         var sim = InGame.instance != null && InGame.instance.bridge != null ? InGame.instance.bridge.simulation : null;
-        if (sim == null) return;
+        var model = sim?.model;
+        if (model == null) return;
         var heroXp = new List<float>();
-        for (var r = 0; r < 500; r++)  // index = rounds completed, so [0] is the XP for finishing round 1
-            heroXp.Add(Simulation.GetXpForRound(r, sim.model));
+        for (var r = 0; r < 500; r++)  // index 0 is the XP for finishing round 1
+            heroXp.Add(Simulation.GetXpForRound(r, model));
         // the static array is indexed by the MapDifficulty enum
         var scales = new Dictionary<string, float>();
         var table = Simulation.trackDifficultyXpScale;
@@ -554,9 +613,74 @@ public class Mod : BloonsTD6Mod
             if (table != null && i >= 0 && i < table.Length) scales[v.ToString()] = table[i];
         }
         File.WriteAllText(Path.Combine(dir, "xp.json"), JsonSerializer.Serialize(
-            new { heroXpPerRound = heroXp, trackDifficultyXpScale = scales },
+            new
+            {
+                version = Application.version,
+                heroXpPerRound = heroXp,
+                trackDifficultyXpScale = scales,
+                sample = new
+                {
+                    gameType = model.gameType.ToString(),
+                    mapDifficulty = model.map?.mapDifficulty.ToString(),
+                    model.selectedDifficultyRating,
+                    model.endRound
+                }
+            },
             new JsonSerializerOptions { WriteIndented = true }));
-        ModHelper.Msg<Mod>($"Dumped hero XP for 140 rounds and {scales.Count} map XP scales");
+        ModHelper.Msg<Mod>($"Dumped hero XP for {heroXp.Count} rounds and {scales.Count} map XP scales");
+        DumpFreeplay(dir);
+    }
+
+    // freeplay.json: how bloons get tougher in late rounds. ProgressiveDifficultyManager keeps its thresholds in static
+    // tables; GetHealthMultiplier/GetSpeedMultiplier take the round shown on screen, so the per-round lists come from
+    // the game's own functions and stay right if a patch changes the formula.
+    static void DumpFreeplay(string dir)
+    {
+        static List<float[]> Pairs(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<Il2CppSystem.Collections.Generic.KeyValuePair<int, float>> a)
+        {
+            var list = new List<float[]>();
+            if (a != null)
+                foreach (var p in a)
+                    list.Add(new float[] { p.Key, p.Value });
+            return list;
+        }
+        static List<T> Plain<T>(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<T> a) where T : unmanaged
+        {
+            var list = new List<T>();
+            if (a != null)
+                foreach (var v in a)
+                    list.Add(v);
+            return list;
+        }
+        var health = new List<float>();
+        var speed = new List<float>();
+        var stun = new List<float>();
+        for (var r = 1; r <= 1000; r++)  // index 0 is round 1
+        {
+            health.Add(ProgressiveDifficultyManager.GetHealthMultiplier(r));
+            speed.Add(ProgressiveDifficultyManager.GetSpeedMultiplier(r));
+            stun.Add(ProgressiveDifficultyManager.GetStunResistance(r));
+        }
+        File.WriteAllText(Path.Combine(dir, "freeplay.json"), JsonSerializer.Serialize(
+            new
+            {
+                version = Application.version,
+                ProgressiveDifficultyManager.fromRound,
+                ProgressiveDifficultyManager.fromRoundRogue,
+                ProgressiveDifficultyManager.healthIncreaseMax,
+                ProgressiveDifficultyManager.superCeramicAdditionalCash,
+                roundBasedHealthIncrease = Pairs(ProgressiveDifficultyManager.roundBasedHealthIncrease),
+                roundBasedSpeedIncrease = Pairs(ProgressiveDifficultyManager.roundBasedSpeedIncrease),
+                bonusHealthIncreaseRounds = Pairs(ProgressiveDifficultyManager.bonusHealthIncreaseRounds),
+                bonusSpeedIncreaseRounds = Pairs(ProgressiveDifficultyManager.bonusSpeedIncreaseRounds),
+                stunResistanceRounds = Plain(ProgressiveDifficultyManager.stunResistanceRounds),
+                stunResistanceAmounts = Plain(ProgressiveDifficultyManager.stunResistanceAmounts),
+                healthMultiplierPerRound = health,
+                speedMultiplierPerRound = speed,
+                stunResistancePerRound = stun
+            },
+            new JsonSerializerOptions { WriteIndented = true }));
+        ModHelper.Msg<Mod>($"Dumped freeplay scaling for {health.Count} rounds");
     }
 
     static void Dump()
